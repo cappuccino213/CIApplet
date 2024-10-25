@@ -1,0 +1,14 @@
+# 发布配置
+[release]
+# 悦库地址
+ysk_url = "http://192.168.1.19:2020"
+# 悦库账号
+ysk_user = "zyp"
+ysk_password = "Yeah0213"
+
+#ysk_user = "robot"
+#ysk_password = "Robot2024"
+
+# 发布目的和本地路径
+release_root_path = "/公共空间/版本库"
+release_local_path = "//192.168.1.19/distribution"

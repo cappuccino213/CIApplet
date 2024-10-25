@@ -8,7 +8,10 @@ import os
 import re
 import subprocess
 
-from configuration import release_config
+from parse_config import configuration
+
+# 获取发布配置信息
+config = configuration.get("release")
 
 
 # 解析文件发布名称类
@@ -39,7 +42,7 @@ class AnalyzeReleaseName:
 
     # 获取本地路径
     def get_local_path(self):
-        local_root_path = release_config.get("local_root_path")
+        local_root_path = config.get("release_local_path")
         # 获取遍历路径
         # release_info = self.analyze_release_info()
         release_info = self.release_info
@@ -56,7 +59,7 @@ class AnalyzeReleaseName:
 
     # 获取发布路径
     def get_release_path(self):
-        release_root_path = release_config.get("release_root_path")
+        release_root_path = config.get("release_root_path")
         # product_name, release_type, release_year = self.analyze_release_info()
         product_name, release_type, release_year = self.release_info
         if release_type in ("RTX", "RC", "M"):
@@ -75,10 +78,12 @@ class AnalyzeReleaseName:
 class CommandConsole:
     def __init__(self):
         self.current_menu = self.main_menu
+        self.run_flag = True
 
     # 运行
     def run(self):
-        while True:
+        # while True:
+        while self.run_flag:
             self.current_menu()
 
     # 执行cmd命令
@@ -97,35 +102,35 @@ class CommandConsole:
     # 功能菜单
     def main_menu(self):
         print(f"{'*' * 10}欢迎使用 eWord发布归档系统{'*' * 10}")
-        print("正在检验ysh运行环境...")
+        print("1正在检验ysh运行环境...")
         result = self.check_ysh()
         if result["return_code"] != 0:
-            print("ysh环境不正确，请检查ysh是否安装正确，且配置了环境变量")
+            print("Error：ysh环境不正确，请检查ysh是否安装正确，且配置了环境变量")
+            self.run_flag = False  # 环境不正确，退出程序
+            input("按任意键退出程序...")
             return
         print(f"检验成功，ysh版本：{result['stdout']}")
 
-        print("正在完成用户信息配置...")
-        login_result = self.ysh_login(release_config["release_url"], release_config["release_user"],
-                                      release_config["release_password"])
+        print("2正在完成用户信息配置...")
+        login_result = self.ysh_login(config["ysk_url"], config["ysk_user"],
+                                      config["ysk_password"])
         print(f"{login_result['stdout']}")
 
         if not self.check_ysh_login():
-            print("ysh登录失败，请检查ysh账号是否正确")
+            print("Error：ysh登录失败，请检查配置文件中ysh账号是否正确")
+            self.run_flag = False  # 账号错误，退出程序
+            input("按任意键退出程序...")
             return
-        release_name = input("ysh登录成功，可以使用归档功能，请输入产品发布名称：")
 
-        print(f"正在解析发布名称...")
+        release_name = input("3ysh登录成功，可以使用归档功能，请输入产品发布名称：")
+
+        print(f"3正在解析发布名称...")
         release_info = AnalyzeReleaseName(release_name)
         if release_info.analyze_release_info() is None:
             print("发布名称不正确，请检查发布名称是否正确")
             return
-        #
-        # local_path = release_info.get_local_path()
-        # release_path = release_info.get_release_path()
-        # if local_path is None or release_path is None:
-        #     print("本地路径和发布路径不正确，请检查")
-        #     return
-        print(f"正在进行文件归档...")
+
+        print(f"4正在进行文件归档...")
         result = self.ysh_put(release_info.get_local_path(), release_info.get_release_path())
         if result["return_code"] == 1:
             print(f"文件归档失败，ysh返回信息为：{result['stdout']}")
@@ -142,6 +147,7 @@ class CommandConsole:
     # 登录ysh账号
     def ysh_login(self, release_url: str, release_user: str, release_password: str):
         cmd = f"ysh user -u {release_url} -a {release_user} -p {release_password}"
+        print(f"执行命令：{cmd}")
         return self.execute_cmd(cmd)
 
     # 清理当前登录用户的ysh登录信息
@@ -162,7 +168,7 @@ class CommandConsole:
         # print(result["stdout"])
         if "账号或密码错误" in result["stdout"] or "请使用" in result["stdout"]:
             return False
-        return True
+        return True  # 表示登录成功
 
 
 if __name__ == "__main__":

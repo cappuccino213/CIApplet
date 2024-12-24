@@ -1,0 +1,25 @@
+# 发布配置
+[release]
+# 悦库地址
+ysk_url = "http://192.168.1.19:2020"
+# 悦库账号
+ysk_user = "zyp"
+ysk_password = "Yeah0213"
+ysk_location = "/公共空间/Docker版本"
+#ysk_user = "robot"
+#ysk_password = "Robot2024"
+
+# 发布目的和本地路径
+release_ydisk_path = "/公共空间/版本库"
+release_share_path = "\\\\192.168.1.19\\distribution"  # 因为\d会变成转义字符，所以用\\d
+release_src_path = "release_base"
+
+# harbor配置
+[harbor]
+host = "192.168.1.33:8080"
+username = "zyp"
+password = "Zyp12345"
+
+# ci系统配置
+[ci]
+host = "http://192.168.1.8:8889"

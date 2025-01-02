@@ -101,7 +101,7 @@ class FileHandle:
         # 按照文件名排序
         program_files.sort()
         if len(program_files) == 0:
-            print(Fore.BLUE + "未找到7z包")
+            print(Fore.BLUE + f"未找到{suffix}包")
             return []
         # 打印列表及序号
         print(Fore.BLUE + f"发现{suffix}包如下列表：")

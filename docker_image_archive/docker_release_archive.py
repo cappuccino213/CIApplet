@@ -84,8 +84,9 @@ class FileHandle:
 
     # 找到程序包函数
     @staticmethod
-    def find_seven_zip_package(zip_directory):
+    def find_the_specified_suffix_file(zip_directory: str, suffix: str):
         """
+        找出指定文件后缀的文件，并列出标号，以7z为例
         1、遍历本地7z文件，如ewordimcis-2024-arm64-v1.2.4.7z
         2、给出程序目录列表
             1 ewordimcis-2024-arm64-v1.2.4.7z
@@ -96,14 +97,14 @@ class FileHandle:
         :param zip_directory:本地程序包目录
         :return:7z包文件名列表
         """
-        program_files = [f for f in os.listdir(zip_directory) if f.endswith('.7z')]
+        program_files = [f for f in os.listdir(zip_directory) if f.endswith(suffix)]
         # 按照文件名排序
         program_files.sort()
         if len(program_files) == 0:
             print(Fore.BLUE + "未找到7z包")
             return []
         # 打印列表及序号
-        print(Fore.BLUE + "遍历到7z包如下：")
+        print(Fore.BLUE + f"发现{suffix}包如下列表：")
         return show_list(program_files)
 
     @staticmethod
@@ -216,10 +217,72 @@ class DockerOperationCli:
             return False
 
 
+# ydisk操作类
+class YDiskOperationCli:
+    def __int__(self):
+        self.ydisk_config = configuration.get("ydisk")
+        self.login_ydisk_flag = self.login_ydisk()
+
+    # 登录ydisk
+    def login_ydisk(self):
+        cmd = f"ysh user -u {self.ydisk_config.get('ysk_url')} -a {self.ydisk_config.get('ysk_user')} -p {self.ydisk_config.get('ysk_password')}"
+        print(Fore.LIGHTBLUE_EX + f"执行命令：{cmd}")
+        return execute_cmd(cmd)
+
+    # 检查文件夹是否存在
+    def check_folder_exist(self, folder_path: str):
+        """
+        :param folder_path:文件夹路径
+        :return:
+        """
+        cmd = f"ysh ls {folder_path}"
+        print(Fore.BLUE + f"执行命令：{cmd}")
+        if execute_cmd(cmd)["return_code"] == 0:
+            print(Fore.LIGHTRED_EX + f"{folder_path}已存在")
+            return True
+        else:
+            print(Fore.LIGHTGREEN_EX + f"{folder_path}不存在")
+            return False
+
+    # 新建文件夹
+    def create_folder(self, folder_path: str):
+        """
+        :param folder_path:文件夹路径
+        :return:
+        """
+        # 先判断文件夹是否存在
+        if self.check_folder_exist(folder_path):
+            return True
+        cmd = f"ysh mkdir {folder_path}"
+        print(Fore.BLUE + f"执行命令：{cmd}")
+        if execute_cmd(cmd)["return_code"] == 0:
+            print(f"{folder_path}创建成功")
+            return True
+        else:
+            print(f"{folder_path}创建失败")
+            return False
+
+    # 上传文件
+    def upload_file(self, local_path: str, release_path: str):
+        """
+        :param local_path:本地文件路径
+        :param release_path:发布路径（文件夹）
+        :return:
+        """
+        cmd = f"ysh put -f {local_path} {release_path}"
+        print(Fore.BLUE + f"执行命令：{cmd}")
+        if execute_cmd(cmd)["return_code"] == 0:
+            print(f"{local_path}上传成功")
+            return True
+        else:
+            print(f"{local_path}上传失败")
+
+
 # 发布业务流程类
 class ReleaseBusiness:
     def __init__(self):
         self.ci_host = configuration.get("ci").get("host")
+        self.release_config = configuration.get("release")
 
     # 从CI接口获取版本发布信息
     def get_release_info(self, build_id: int):
@@ -310,7 +373,8 @@ class ReleaseBusiness:
                     tar_path = os.path.join(os.getcwd(), "image_tar", release_info["tar_name"])
                     # 打包镜像
                     # print(Fore.LIGHTYELLOW_EX + f"[+] 3/3开始打包镜像，镜像地址：{image_url}，输出路径：{tar_path}...")
-                    print(Fore.LIGHTYELLOW_EX + f"[+] 3/3开始打包镜像，镜像地址：{new_image_name}:{tag}，输出路径：{tar_path}...")
+                    print(
+                        Fore.LIGHTYELLOW_EX + f"[+] 3/3开始打包镜像，镜像地址：{new_image_name}:{tag}，输出路径：{tar_path}...")
                     return doc.save_image_to_tar(f"{new_image_name}:{tag}", tar_path)
             else:
                 print(Fore.RED + "镜像拉取失败，请检查镜像地址或版本id是否关联镜像")
@@ -323,18 +387,59 @@ class ReleaseBusiness:
     # 版本打包(tar+脚本)
 
     # 程序归入悦库、共享库
-
-    # --清理预发布程序源
-    @staticmethod
-    def clean_local_file():
+    def upload_release_to_ydisk(self):
         # 获取预发布文件夹路径
-        rc_real_path = os.path.join(os.getcwd(), configuration.get("release").get("rc_src_path"))
+        rc_real_path = os.path.join(os.getcwd(), self.release_config.get("rc_src_path"))
         # 获取预发布文件列表
-        rc_file_list = FileHandle.find_seven_zip_package(rc_real_path)
-        # 获取预发布文件路径
+        print(Fore.LIGHTBLUE_EX + "待发布7z文件列出,请选择...")
+        rc_file_list = FileHandle.find_the_specified_suffix_file(rc_real_path, ".7z")
+
+        # 解析出对应的悦库上传路径
+        print(Fore.LIGHTYELLOW_EX + "[+] 1/2开始解析上传文件路径...")
+        release_ydisk_path = self.release_config.get("release_ydisk_path")
+        release_detail_paths = []
+        ydoc = YDiskOperationCli()
+        for rc_file in rc_file_list:
+            rc_file_names = rc_file.split("-")
+            first_path, second_path, third_path = rc_file_names[0], rc_file_names[1], rc_file_names[2][:4]
+            # 因为ydisk不支持全路径创建，所以需要逐级创建
+            ydoc.create_folder(release_ydisk_path + "/" + first_path)
+            ydoc.create_folder(release_ydisk_path + "/" + first_path + "/" + second_path)
+            ydoc.create_folder(release_ydisk_path + "/" + first_path + "/" + second_path + "/" + third_path)
+            release_detail_paths.append(release_ydisk_path + "/" + first_path + "/" + second_path + "/" + third_path)
+        print(release_detail_paths)
+
+        # 上传文件
+        print(Fore.LIGHTYELLOW_EX + "[+] 2/2开始上传文件...")
+        for rc_file, release_path in zip(rc_file_list, release_detail_paths):
+            rc_file_path = os.path.join(rc_real_path, rc_file)
+            print(Fore.LIGHTYELLOW_EX + f"开始上传文件：{rc_file_path}，上传路径：{release_path}")
+            ydoc.upload_file(rc_file_path, release_path)
+
+    # --清理指定后缀文件
+    @staticmethod
+    def clean_local_file(directory: str, suffix: str):
+        """
+        :param directory: 程序根目录下的文件夹路径，如release_base  image_tar
+        :param suffix: 文件后缀名
+        :return:
+        """
+        # 获取指定文件夹路径
+        rc_real_path = os.path.join(os.getcwd(), directory)
+        # 获取指定文件列表
+        rc_file_list = FileHandle.find_the_specified_suffix_file(rc_real_path, suffix)
+        # 获取指定文件路径
         rc_file_path = [os.path.join(rc_real_path, rc_file_name) for rc_file_name in rc_file_list]
-        # 清除预发布文件
+        # 清除文件
         FileHandle.remove_file(rc_file_path)
+
+    # 清除tar文件
+    def clean_tar_file(self):
+        self.clean_local_file("image_tar", ".tar")
+
+    # 清除预发布文件
+    def clean_rc_srcs(self):
+        self.clean_local_file(self.release_config.get("rc_src_path"), ".7z")
 
 
 # 控制台应用类
@@ -344,11 +449,12 @@ class ConsoleApp:
     # 构造菜单方法
     def __init__(self):
         self.menu_options = {
-            '1': self.release_docker,
-            '2': self.build_image_tar,
-            '3': self.generate_deploy_script,
-            '4': self.generate_upgrade_script,
-            '6': self.clean_rc_srcs,
+            '1': self.build_image_tar,
+            '2': self.generate_deploy_script,
+            '3': self.generate_upgrade_script,
+            '4': self.release_docker,
+            '5': self.clean_rc_srcs,
+            '6': self.clean_tar_file,
             'q': self.exit_app
         }
 
@@ -358,11 +464,12 @@ class ConsoleApp:
         welcome_text = "|--欢迎使用Docker镜像发布程序--|"
         print(Back.BLUE + Fore.BLACK + Style.BRIGHT + f"{welcome_text}")
         print(Fore.WHITE + Style.BRIGHT + "--------功能菜单----------")
-        print(Fore.CYAN + Style.BRIGHT + "1. 发布镜像")
-        print(Fore.GREEN + Style.BRIGHT + "2. 打包镜像(*.tar)")
-        print(Fore.YELLOW + Style.BRIGHT + "3. 生成部署脚本")
-        print(Fore.BLUE + Style.BRIGHT + "4. 生成升级脚本")
-        print(Fore.RED + Style.BRIGHT + "6. 清除发布源文件")
+        print(Fore.GREEN + Style.BRIGHT + "1. 打包镜像(*.tar)")
+        print(Fore.YELLOW + Style.BRIGHT + "2. 生成部署脚本")
+        print(Fore.LIGHTYELLOW_EX + Style.BRIGHT + "3. 生成升级脚本")
+        print(Fore.CYAN + Style.BRIGHT + "4. 发布镜像")
+        print(Fore.RED + Style.BRIGHT + "5. 清除发布源文件")
+        print(Fore.LIGHTRED_EX + Style.BRIGHT + "6. 清除打包文件")
         print(Fore.MAGENTA + Style.BRIGHT + "q. 退出程序")
         print(Fore.WHITE + Style.BRIGHT + '-' * (len(welcome_text) + 6) + Style.RESET_ALL)
 
@@ -377,10 +484,6 @@ class ConsoleApp:
                 print(Fore.RED + "无效的选择，请重新输入！" + Style.RESET_ALL)
 
     # 选项方法
-    @staticmethod
-    def release_docker():
-        print(Fore.LIGHTGREEN_EX + "功能【1.发布镜像】执行完毕！正在返回主菜单...\n")
-
     @staticmethod
     # def build_image_tar():
     #     # 输入镜像地址，示例地址："192.168.1.33:8080/ewordarchive/ewordarchive-gen20241218:v1.0.13-x86-64"
@@ -420,11 +523,23 @@ class ConsoleApp:
         pass
         print(Fore.LIGHTGREEN_EX + "功能【生成升级脚】执行完毕！正在返回主菜单...\n")
 
+    @staticmethod
+    def release_docker():
+        print(Fore.LIGHTGREEN_EX + "已进入【发布镜像】功能...")
+        ReleaseBusiness().upload_release_to_ydisk()
+        print(Fore.LIGHTGREEN_EX + "功能【发布镜像】执行完毕！正在返回主菜单...\n")
+
     # 清除预发布程序源
     @staticmethod
     def clean_rc_srcs():
         print(Fore.LIGHTGREEN_EX + "已进入【清除预发布源】功能...")
-        ReleaseBusiness.clean_local_file()
+        ReleaseBusiness().clean_rc_srcs()
+        print(Fore.LIGHTGREEN_EX + "功能【清除预发布源】执行完毕！正在返回主菜单...\n")
+
+    @staticmethod
+    def clean_tar_file():
+        print(Fore.LIGHTGREEN_EX + "已进入【清除打包文件】功能...")
+        ReleaseBusiness().clean_tar_file()
         print(Fore.LIGHTGREEN_EX + "功能【清除预发布源】执行完毕！正在返回主菜单...\n")
 
     @staticmethod
@@ -436,5 +551,6 @@ class ConsoleApp:
 if __name__ == "__main__":
     ConsoleApp().run()
     # rb = ReleaseBusiness()
+    # rb.upload_release_to_ydisk()
     # rb.get_release_info(1414)
     # rb.clean_local_file()

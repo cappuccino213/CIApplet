@@ -1,19 +1,20 @@
 #--发布配置--
 [release]
+# docker发布目的
+release_ydisk_path = "/公共空间/Docker版本"
+release_share_path = "\\\\192.168.1.19\\distribution"  # 因为\d会变成转义字符，所以用\\d
+# 预发布程序源路径
+rc_src_path = "release_base"  # 表示根目录下的release_base文件夹
+
+#--悦库网盘配置--
+[ydisk]
 # 悦库地址
 ysk_url = "http://192.168.1.19:2020"
 # 悦库账号
 ysk_user = "zyp"
 ysk_password = "Yeah0213"
-ysk_location = "/公共空间/Docker版本"
 #ysk_user = "robot"
 #ysk_password = "Robot2024"
-
-# 发布目的
-release_ydisk_path = "/公共空间/版本库"
-release_share_path = "\\\\192.168.1.19\\distribution"  # 因为\d会变成转义字符，所以用\\d
-# 预发布程序源路径
-rc_src_path = "release_base"
 
 #--harbor配置--
 [harbor]
@@ -27,3 +28,5 @@ host = "http://192.168.1.8:8889"
 
 #--脚本配置--
 [script]
+base_path = "script"
+config_path = "config"

@@ -5,6 +5,8 @@ release_ydisk_path = "/公共空间/Docker版本"
 release_share_path = "\\\\192.168.1.19\\distribution"  # 因为\d会变成转义字符，所以用\\d
 # 预发布程序源路径
 rc_src_path = "release_base"  # 表示根目录下的release_base文件夹
+# tar包生成目录
+tar_path = "image_tar"
 
 #--悦库网盘配置--
 [ydisk]
@@ -28,5 +30,35 @@ host = "http://192.168.1.8:8889"
 
 #--脚本配置--
 [script]
-base_path = "script"
-config_path = "config"
+
+# compose配置
+[docker_compose]
+version = "3.8"
+
+# service可配信息
+[docker_compose.services.ewordris]
+ports = ["7061:7061"]
+volumes = ["/opt/eword/ris/appsettings.json:/app/appsettings.json","/opt/eword/ris/log4net.config:/app/log4net.config",
+    "/opt/eword/ris/DBconfig.json:/app/DBconfig.json"]
+environment = ["TZ=Asia/Shanghai"]
+
+[docker_compose.services.ewordarchive]
+ports = ["8050:8050", "104:104"]
+volumes = ["/opt/eword/ris/appsettings.json:/app/appsettings.json","/opt/eword/ris/log4net.config:/app/log4net.config",
+    "/opt/eword/ris/DBconfig.json:/app/DBconfig.json"]
+environment = ["TZ=Asia/Shanghai"]
+
+[docker_compose.services.ewordviewer]
+ports = ["8060:8060"]
+volumes = ["/opt/eword/ris/appsettings.json:/app/appsettings.json","/opt/eword/ris/log4net.config:/app/log4net.config",
+    "/opt/eword/ris/DBconfig.json:/app/DBconfig.json"]
+environment = ["TZ=Asia/Shanghai"]
+
+[docker_compose.services.ewordtoken]
+ports = ["8080:8080"]
+
+[docker_compose.services.ewordimcis]
+ports = ["9050:9050"]
+volumes = ["/opt/eword/ris/appsettings.json:/app/appsettings.json","/opt/eword/ris/log4net.config:/app/log4net.config",
+    "/opt/eword/ris/DBconfig.json:/app/DBconfig.json"]
+environment = ["TZ=Asia/Shanghai"]

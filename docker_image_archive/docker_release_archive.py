@@ -8,6 +8,9 @@ import os
 import subprocess
 import time
 import requests
+import yaml
+import random
+import string
 # 控制台样式库导入
 from colorama import init, Fore, Back, Style
 
@@ -64,6 +67,16 @@ def show_list(data: list):
             print(Fore.RED + "无效的输入，请重新输入!!!")
 
 
+# 随机生成随机字符串函数
+def generate_random_string(length=6):
+    """
+    生成随机字符串
+    :param length: 字符串长度
+    :return: 随机字符串
+    """
+    return ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(length))
+
+
 # 文件处理类
 class FileHandle:
     """文件处理类"""
@@ -82,9 +95,9 @@ class FileHandle:
         # print(readable_time)
         return readable_time
 
-    # 找到程序包函数
+    # 找到文件函数
     @staticmethod
-    def find_the_specified_suffix_file(zip_directory: str, suffix: str):
+    def find_the_specified_suffix_file(file_directory: str, suffix: str):
         """
         找出指定文件后缀的文件，并列出标号，以7z为例
         1、遍历本地7z文件，如ewordimcis-2024-arm64-v1.2.4.7z
@@ -94,17 +107,17 @@ class FileHandle:
             3 ewordbds-2025-amd64-v1.2.3.7z
         3、输入序号，支持多选，以空格分隔，全选输入a回车
         4、输出对应文件名列表
-        :param zip_directory:本地程序包目录
+        :param file_directory:本地程序包目录
         :return:7z包文件名列表
         """
-        program_files = [f for f in os.listdir(zip_directory) if f.endswith(suffix)]
+        program_files = [f for f in os.listdir(file_directory) if f.endswith(suffix)]
         # 按照文件名排序
         program_files.sort()
         if len(program_files) == 0:
             print(Fore.BLUE + f"未找到{suffix}包")
             return []
         # 打印列表及序号
-        print(Fore.BLUE + f"发现{suffix}包如下列表：")
+        print(Fore.BLUE + f"正在检测*{suffix}的文件，列表如下：")
         return show_list(program_files)
 
     @staticmethod
@@ -283,6 +296,8 @@ class ReleaseBusiness:
     def __init__(self):
         self.ci_host = configuration.get("ci").get("host")
         self.release_config = configuration.get("release")
+        # 获取docker-compose的配置
+        self.docker_compose_config = configuration.get("docker_compose")
 
     # 从CI接口获取版本发布信息
     def get_release_info(self, build_id: int):
@@ -380,11 +395,107 @@ class ReleaseBusiness:
                 print(Fore.RED + "镜像拉取失败，请检查镜像地址或版本id是否关联镜像")
                 continue
 
-    # --创建脚本
-    def create_deploy_script(self):
-        pass
+    # --创建docker-compose.yml文件
 
-    # 版本打包(tar+脚本)
+    # 解析tar包信息
+    @staticmethod
+    def parse_tar_info(tar_name: str):
+        """
+        从规范的tar中获取compose的配置信息，比如service、image、container_name
+        :param tar_name: 固定格式ewordimcis-api-gen20241126-v3.0.1-x86-64.tar
+        :return:
+        """
+        # 将名字转化为list，排除x86-64的干扰，其中有-，需要排除；去掉后缀.tar
+        tar_name = tar_name.replace("x86-64", "x86_64").replace(".tar", "")
+        tar_list = tar_name.split("-")
+        # 如果存在x86_64,还原成x86-64，arm64架构就不用处理
+        if tar_list[-1] == "x86_64":
+            tar_list[-1] = "x86-64"
+        # 获取service，根据长度判断，长度为5，则前为前两个，长度是4，则为第一个
+        if len(tar_list) == 5:
+            service = f"{tar_list[0]}-{tar_list[1]}"
+        else:
+            service = tar_list[0]
+        # 获取image，前面元素以-拼接，后面两个元素以-拼接，然后用:拼接
+        image_name = "-".join(tar_list[:-2])
+        image_tag = "-".join(tar_list[-2:])
+        image = f"{image_name}:{image_tag}"
+        # 获取container_name,用service拼接版本号（倒数第二个元素）
+        container_name = f"{service}-{tar_list[-2]}"
+
+        return {
+            "service": service,
+            "image": image,
+            "container_name": container_name
+        }
+
+    # 生成docker-compose的文件对应的python的dict
+    def generate_docker_compose_dict(self, tar_list) -> dict:
+        """
+        生成 docker-compose 配置字典
+        :param tar_list:tar 包名称列表
+        :return:
+        """
+        docker_compose_dict = {
+            # "version": self.docker_compose_config.get("version"),
+            "services": {}
+        }
+        # 遍历tar包名称列表，生成docker-compose配置字典
+        for tar_name in tar_list:
+            tar_info = self.parse_tar_info(tar_name)
+            service = tar_info.get("service")
+            image = tar_info.get("image")
+            container_name = tar_info.get("container_name")
+
+            # service必须配置信息
+            service_config = {
+                "image": image,
+                "container_name": container_name,
+            }
+            # 从docker_compose_config中获取可选信息进行添加
+            if service in self.docker_compose_config.get("services"):
+                service_config.update(self.docker_compose_config.get("services").get(service))
+            docker_compose_dict["services"].update({service: service_config})
+        return docker_compose_dict
+
+    # 将dict转换成docker-compose的yaml格式
+    @staticmethod
+    def dict_to_yaml(config_dict: dict):
+        """
+        将配置字典转换为 YAML 格式并写入文件
+        :param config_dict:
+        :return:
+        """
+        yaml_str = yaml.dump(config_dict, default_flow_style=False, sort_keys=False)
+        print(Fore.LIGHTBLUE_EX + f"字典数据转成的yaml字符串：\n{yaml_str}")
+        try:
+            with open("docker-compose.yml", "w") as f:
+                f.write(yaml_str)
+        except IOError as e:
+            print(Fore.RED + f"写入文件时出错：{e}")
+            return False
+        print(Fore.LIGHTGREEN_EX + f"已保存到{os.path.join(os.getcwd(), 'docker-compose.yml')}")
+        return True
+
+    # 根据tar包的列表生成docker-compose.yml文件
+    def generate_docker_compose_yml(self):
+        # 获取tar包路径
+        tar_path = os.path.join(os.getcwd(), self.release_config.get("tar_path"))
+        # 获取tar包列表
+        tar_list = FileHandle.find_the_specified_suffix_file(tar_path, ".tar")
+        # 生成docker-compose配置字典
+        docker_compose_dict = self.generate_docker_compose_dict(tar_list)
+        # 将字典转换为 YAML 格式并写入文件
+        return self.dict_to_yaml(docker_compose_dict)
+
+    # --版本打包(tar+yaml)
+    def release_version_package(self):
+        # 获取tar包路径
+        tar_path = os.path.join(os.getcwd(), self.release_config.get("tar_path"))
+        # 选取预发布文件
+        tar_list = FileHandle.find_the_specified_suffix_file(tar_path, ".tar")
+
+        # 调用bandzip的命令打包
 
     # 程序归入悦库、共享库
     def upload_release_to_ydisk(self):
@@ -450,8 +561,8 @@ class ConsoleApp:
     def __init__(self):
         self.menu_options = {
             '1': self.build_image_tar,
-            '2': self.generate_deploy_script,
-            '3': self.generate_upgrade_script,
+            '2': self.generate_docker_compose_yml,
+            '3': self.package_version,
             '4': self.release_docker,
             '5': self.clean_rc_srcs,
             '6': self.clean_tar_file,
@@ -465,12 +576,12 @@ class ConsoleApp:
         print(Back.BLUE + Fore.BLACK + Style.BRIGHT + f"{welcome_text}")
         print(Fore.WHITE + Style.BRIGHT + "--------功能菜单----------")
         print(Fore.GREEN + Style.BRIGHT + "1. 打包镜像(*.tar)")
-        print(Fore.YELLOW + Style.BRIGHT + "2. 生成部署脚本")
-        print(Fore.LIGHTYELLOW_EX + Style.BRIGHT + "3. 生成升级脚本")
-        print(Fore.CYAN + Style.BRIGHT + "4. 发布镜像")
+        print(Fore.LIGHTGREEN_EX + Style.BRIGHT + "2. 生成docker-compose.yml")
+        print(Fore.CYAN + Style.BRIGHT + "3. 程序版本打包（tar+yml-->7z）")
+        print(Fore.LIGHTBLUE_EX + Style.BRIGHT + "4. 发布程序版本")
         print(Fore.RED + Style.BRIGHT + "5. 清除发布源文件")
         print(Fore.LIGHTRED_EX + Style.BRIGHT + "6. 清除打包文件")
-        print(Fore.MAGENTA + Style.BRIGHT + "q. 退出程序")
+        print(Fore.LIGHTYELLOW_EX + Style.BRIGHT + "q. 退出程序")
         print(Fore.WHITE + Style.BRIGHT + '-' * (len(welcome_text) + 6) + Style.RESET_ALL)
 
     # 主运行方法
@@ -485,43 +596,23 @@ class ConsoleApp:
 
     # 选项方法
     @staticmethod
-    # def build_image_tar():
-    #     # 输入镜像地址，示例地址："192.168.1.33:8080/ewordarchive/ewordarchive-gen20241218:v1.0.13-x86-64"
-    #     image_path = input(Fore.WHITE + Style.BRIGHT + "请输入镜像地址：").strip()
-    #     # 输入tar包保存目录，输入D则表述输出到默认目录（当前目录的tmp文件夹）
-    #     tar_path = input(
-    #         Fore.WHITE + Style.BRIGHT + "请输入tar包保存目录，输入D则表述输出到默认目录（当前目录的tmp文件夹）：").strip().lower()
-    #     if tar_path == "d":
-    #         # 获取当前目录
-    #         current_dir = os.getcwd()
-    #         tar_path = os.path.join(current_dir, "tmp")
-    #     # 取最后一个/之后的内容，将冒号替换成 -
-    #     tar_file_name = image_path.split("/")[-1].replace(":", "-")
-    #     # 拼接tar输出路径
-    #     tar_file_path = f"{tar_path}/{tar_file_name}.tar"
-    #
-    #     # 初始化 docker操作类
-    #     doc = DockerOperationCli()
-    #     # 先拉取镜像，本地存在不会重复拉取
-    #     print(Fore.LIGHTYELLOW_EX + "[+] 1/2开始拉取镜像...")
-    #     doc.pull_image_from_harbor(image_path)
-    #     # 打包镜像
-    #     print(Fore.LIGHTYELLOW_EX + f"[+] 2/2开始打包镜像，镜像地址：{image_path}，输出路径：{tar_file_path}...")
-    #     doc.save_image_to_tar(image_path, tar_file_path)
-    #     print(Fore.LIGHTGREEN_EX + "功能【打包镜像】执行完毕！正在返回主菜单...\n")
     def build_image_tar():
         ReleaseBusiness().package_image_tar()
         print(Fore.LIGHTGREEN_EX + "功能【打包镜像】执行完毕！正在返回主菜单...\n")
 
     @staticmethod
-    def generate_deploy_script():
-        pass
-        print(Fore.LIGHTGREEN_EX + "功能【生成部署脚本】执行完毕！正在返回主菜单...\n")
+    def generate_docker_compose_yml():
+        print(Fore.LIGHTGREEN_EX + "已进入【生成docker-compose.yml】功能...")
+        ReleaseBusiness().generate_docker_compose_yml()
+        print(Fore.LIGHTGREEN_EX + "功能【生成docker-compose.yml】执行完毕！正在返回主菜单...\n")
+
+    # 打包程序版本
 
     @staticmethod
-    def generate_upgrade_script():
+    def package_version():
+        print(Fore.LIGHTGREEN_EX + "已进入【打包程序版本】功能...\n")
         pass
-        print(Fore.LIGHTGREEN_EX + "功能【生成升级脚】执行完毕！正在返回主菜单...\n")
+        print(Fore.LIGHTGREEN_EX + "功能【打包程序版本】执行完毕！正在返回主菜单...\n")
 
     @staticmethod
     def release_docker():
